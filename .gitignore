@@ -218,5 +218,26 @@ __marimo__/
 .streamlit/secrets.toml
 
 .sqlite3
+.sqlite
+
+.claude
+
+.venv-workers
+
+.wrangler
 
 *.sql
+
+wrangler.toml
+
+# Cloudflare Workers / pywrangler
+# deps vendorizadas, regenerables (pywrangler dev/deploy)
+python_modules/
+# lock generado por pywrangler
+pylock.toml
+# secretos locales de Cloudflare dev (NUNCA al repo)
+.dev.vars
+.dev.vars.*
+# estado de miniflare
+.mf/
+node_modules/

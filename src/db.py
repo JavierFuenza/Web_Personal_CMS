@@ -1,239 +1,297 @@
-import sqlite3
+"""Capa de datos sobre Cloudflare D1.
 
-DB_path = "db.sqlite3"
+D1 es SQLite gestionado, pero su binding es ASINCRONO y solo acepta
+parametros POSICIONALES (?). No hay filesystem en runtime, asi que el SQL
+va embebido como constantes en vez de leerse desde sql/*.sql.
 
-# Conexion a db
-def get_conn():
-    conn = sqlite3.connect(DB_path)
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.row_factory = sqlite3.Row  # para acceder por nombre: row["title"]
-    return conn
+Cada funcion recibe `env` (el binding del Worker). Se accede a la base via
+`env.cms`, donde "DB" es el binding declarado en wrangler.toml.
+"""
 
-#Configurar db
-def init_db():
-    with open('sql/schema.sql', 'r') as file:
-        schema = file.read()
+# --- SQL embebido -----------------------------------------------------------
 
-    conn = get_conn()
-    try:
-        conn.executescript(schema)
-        conn.commit()
-    finally:
-        conn.close()
+SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS album (
+    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE
+);
 
-# Obtener todos los registros (vistazo) (para galeria)
-def get_all():
-    with open('sql/get_all.sql', 'r') as file:
-        getall = file.read()
+CREATE TABLE IF NOT EXISTS tag (
+    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE
+);
 
-    conn = get_conn()
-    try:
-        return conn.execute(getall).fetchall()
-    finally:
-        conn.close()
+CREATE TABLE IF NOT EXISTS entry (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    type         TEXT NOT NULL CHECK(type IN ('photo', 'video', 'post')),
+    title        TEXT,
+    description  TEXT,
+    body         TEXT,
+    slug         TEXT UNIQUE,
+    file_path    TEXT,
+    file_size    INTEGER,
+    width        INTEGER,
+    height       INTEGER,
+    taken_at     TEXT,
+    is_analog    INTEGER DEFAULT 0 CHECK(is_analog IN (0, 1)),
+    camera_model TEXT,
+    film_stock   TEXT,
+    duration     INTEGER,
+    album_id     INTEGER REFERENCES album(id) ON DELETE SET NULL,
+    status       TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'published')),
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now')),
+    published_at TEXT
+);
 
-# Obtener lista de tags disponibles
-def get_tags():
-    with open('sql/get_tags.sql', 'r') as file:
-        getags = file.read()
+CREATE TABLE IF NOT EXISTS entry_tag (
+    entry_id INTEGER NOT NULL REFERENCES entry(id) ON DELETE CASCADE,
+    tag_id   INTEGER NOT NULL REFERENCES tag(id)   ON DELETE CASCADE,
+    PRIMARY KEY (entry_id, tag_id)
+);
+"""
 
-    conn = get_conn()
-    try:
-        return conn.execute(getags).fetchall()
-    finally:
-        conn.close()
+GET_ALL = """
+SELECT e.id, e.title, e.description, e.type, e.status, e.published_at, e.file_path, a.name AS album_name
+FROM entry e
+LEFT JOIN album a ON e.album_id = a.id
+"""
 
-# Obtener tags asociadas a un entry
-def get_entry_tags(entry_id):
-    with open('sql/get_entry_tags.sql', 'r') as file:
-        getet = file.read()
+GET_DETAIL = """
+SELECT e.id, e.type, e.title, e.description, e.body, e.slug, e.file_path, e.file_size, e.width, e.height, e.taken_at, e.is_analog, e.camera_model, e.film_stock, e.duration, e.status, e.created_at, e.published_at, a.name AS album_name
+FROM entry e
+LEFT JOIN album a ON e.album_id = a.id
+WHERE e.id = ?
+"""
 
-    conn = get_conn()
-    try:
-        return conn.execute(getet,(entry_id,)).fetchall()
-    finally:
-        conn.close()
+GET_ENTRY_TAGS = """
+SELECT e.id AS entry_id, t.name AS tag_name
+FROM entry e
+INNER JOIN entry_tag et ON e.id = et.entry_id
+INNER JOIN tag t ON et.tag_id = t.id
+WHERE e.id = ?
+"""
+
+GET_BY_TYPE = """
+SELECT e.id, e.title, e.description, e.type, e.status, e.published_at, e.file_path, a.name AS album_name
+FROM entry e
+LEFT JOIN album a ON e.album_id = a.id
+WHERE type = ?
+"""
+
+GET_BY_STATUS = """
+SELECT e.id, e.title, e.description, e.type, e.status, e.published_at, e.file_path, a.name AS album_name
+FROM entry e
+LEFT JOIN album a ON e.album_id = a.id
+WHERE status = ?
+"""
+
+GET_ALBUMS = "SELECT id, name FROM album"
+
+GET_ALBUM_ENTRY = """
+SELECT e.id, e.title, e.file_path, a.id as album_id, a.name
+FROM entry e
+JOIN album a ON e.album_id = a.id
+WHERE a.id = ?
+"""
+
+GET_BY_TAG = """
+SELECT e.id, e.title, e.description, e.type, e.status, e.published_at, e.file_path, t.id as tag_id, t.name
+FROM entry e
+INNER JOIN entry_tag et ON e.id = et.entry_id
+INNER JOIN tag t ON et.tag_id = t.id
+WHERE t.id = ?
+"""
+
+GET_TAGS = "SELECT id, name FROM tag"
+GET_TAG_ID = "SELECT id FROM tag WHERE name = ?"
+GET_ALBUM_ID = "SELECT id FROM album WHERE name = ?"
+SLUG_EXISTS = "SELECT 1 FROM entry WHERE slug = ? LIMIT 1"
+
+CREATE_TAG = "INSERT OR IGNORE INTO tag (name) VALUES (?)"
+CREATE_ALBUM = "INSERT OR IGNORE INTO album (name) VALUES (?)"
+
+# Parametros posicionales en el orden de las columnas (D1 no soporta :nombre).
+CREATE_ENTRY = """
+INSERT INTO entry(type, title, description, body, slug, file_path, file_size, width, height, taken_at, is_analog, camera_model, film_stock, duration, album_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+CREATE_ENTRY_TAG = "INSERT OR IGNORE INTO entry_tag (tag_id, entry_id) VALUES (?, ?)"
+
+UPDATE_ENTRY = """
+UPDATE entry SET
+    type = ?, title = ?, description = ?, body = ?, slug = ?,
+    file_path = ?, file_size = ?, width = ?, height = ?, taken_at = ?,
+    is_analog = ?, camera_model = ?, film_stock = ?, duration = ?, album_id = ?,
+    status = ?, published_at = ?
+WHERE id = ?
+"""
+
+DELETE_ENTRY = "DELETE FROM entry WHERE id = ?"
+PUBLISH_ENTRY = 'UPDATE entry SET status = "published" WHERE id = ?'
+DRAFT_ENTRY = 'UPDATE entry SET status = "draft" WHERE id = ?'
 
 
-# Obtener entry por tipo (Retorna vistazo, no todo el detalle)
-def get_by_type(entry_type):
-    with open('sql/get_by_type.sql', 'r') as file:
-        getbt = file.read()
+# --- Helpers de conversion de resultados ------------------------------------
+# D1 devuelve objetos JS (JsProxy en Pyodide). Los convertimos a dict/list de
+# Python para que las plantillas Jinja2 puedan usar acceso por clave: row["x"].
 
-    conn = get_conn()
-    try:
-        return conn.execute(getbt, (entry_type,)).fetchall()
-    finally:
-        conn.close()
-    
-# Obtener detalle
-def get_detail(entry_id):
-    with open('sql/get_detail.sql', 'r') as file:
-        getd = file.read()
-    conn = get_conn()
-    try:
-        entry = conn.execute(getd, (entry_id,)).fetchone()
-    finally:
-        conn.close()
-    tags = get_entry_tags(entry_id)
+def _to_dict(row):
+    if row is None:
+        return None
+    to_py = getattr(row, "to_py", None)
+    if to_py is not None:
+        return to_py()
+    return dict(row)
+
+
+def _to_list(res):
+    rows = res.results
+    to_py = getattr(rows, "to_py", None)
+    if to_py is not None:
+        return to_py()
+    return [_to_dict(r) for r in rows]
+
+
+# --- Configurar db ----------------------------------------------------------
+
+async def init_db(env):
+    statements = [s.strip() for s in SCHEMA_SQL.split(";") if s.strip()]
+    await env.cms.batch([env.cms.prepare(s) for s in statements])
+
+
+# --- Lecturas ---------------------------------------------------------------
+
+async def get_all(env):
+    return _to_list(await env.cms.prepare(GET_ALL).all())
+
+
+async def get_tags(env):
+    return _to_list(await env.cms.prepare(GET_TAGS).all())
+
+
+async def get_entry_tags(env, entry_id):
+    return _to_list(await env.cms.prepare(GET_ENTRY_TAGS).bind(entry_id).all())
+
+
+async def get_by_type(env, entry_type):
+    return _to_list(await env.cms.prepare(GET_BY_TYPE).bind(entry_type).all())
+
+
+async def get_detail(env, entry_id):
+    entry = _to_dict(await env.cms.prepare(GET_DETAIL).bind(entry_id).first())
+    tags = await get_entry_tags(env, entry_id)
     return entry, tags
 
-# Obtener entries por estado (publicadas o borradores) (sirve para front y cms)
-def get_by_status(entry_status):
-    with open('sql/get_by_status.sql', 'r') as file:
-        gets = file.read()
 
-    conn = get_conn()
-    try:
-        return conn.execute(gets,(entry_status,)).fetchall()
-    finally:
-        conn.close()
+async def get_by_status(env, entry_status):
+    return _to_list(await env.cms.prepare(GET_BY_STATUS).bind(entry_status).all())
 
-# Obtener todos los albums
-def get_albums():
-    with open('sql/get_albums.sql', 'r') as file:
-        geta = file.read()
-    
-    conn = get_conn()
-    try:
-        return conn.execute(geta).fetchall()
-    finally:
-        conn.close()
 
-# Obtener fotos de un album especifico
-def get_album_entry(album_id):
-    with open('sql/get_album_entry.sql', 'r') as file:
-            getae = file.read()
+async def get_albums(env):
+    return _to_list(await env.cms.prepare(GET_ALBUMS).all())
 
-    conn = get_conn()
-    try:
-        return conn.execute(getae,(album_id,)).fetchall()
-    finally:
-        conn.close()
 
-# Obtener entry de un tag especifico
-def get_by_tag(tag_id):
-    with open('sql/get_by_tag.sql', 'r') as file:
-        gett = file.read()
+async def get_album_entry(env, album_id):
+    return _to_list(await env.cms.prepare(GET_ALBUM_ENTRY).bind(album_id).all())
 
-    conn = get_conn()
-    try:
-        return conn.execute(gett,(tag_id,)).fetchall()
-    finally:
-        conn.close()
 
-# Crear una entry
+async def get_by_tag(env, tag_id):
+    return _to_list(await env.cms.prepare(GET_BY_TAG).bind(tag_id).all())
 
-def create_entry(entry_data):
 
-# entry_data = {
-#     "type": "",          # "photo" | "video" | "post"
-#     "title": "",
-#     "description": "",
-#     "body": "",          # solo posts
-#     "slug": "",          # solo posts
-#     "file_path": "",     # foto y video
-#     "file_size": 0,      # foto y video
-#     "width": 0,          # solo foto
-#     "height": 0,         # solo foto
-#     "taken_at": "",      # solo foto
-#     "is_analog": 0,      # solo foto, 0 | 1
-#     "camera_model": "",  # solo foto
-#     "film_stock": "",    # solo foto
-#     "duration": 0,       # solo video
-#     "album": "",         # nombre del album, foto y video
-#     "tags": [],          # lista de strings
-# }
+async def slug_exists(env, slug):
+    row = await env.cms.prepare(SLUG_EXISTS).bind(slug).first()
+    return row is not None
 
-    with open('sql/create_tag.sql', 'r') as file:
-        create_tag = file.read()
-    with open('sql/get_tag_id.sql', 'r') as file:
-        getti = file.read()
-    with open('sql/create_album.sql', 'r') as file:
-        create_album = file.read()
-    with open('sql/get_album_id.sql', 'r') as file:
-        getai = file.read()
-    with open('sql/create_entry.sql', 'r') as file:
-        create = file.read()
-    with open('sql/create_entry_tag.sql', 'r') as file:
-        create_et = file.read()
 
-    conn = get_conn()
-    try:
-        #Insert en tags y obtener tag ids
-        tags_ids = []
-        for tag_name in entry_data.get("tags", []):
-            conn.execute(create_tag,(tag_name,))
-            tag_id = conn.execute(getti,(tag_name,)).fetchone()
-            tags_ids.append(tag_id["id"])
+# --- Escrituras -------------------------------------------------------------
 
-        #Insert en album y obtener album id
-        album_id = None
-        if entry_data.get("album"):
-            conn.execute(create_album,(entry_data["album"],))
-            album_id = conn.execute(getai,(entry_data["album"],)).fetchone()["id"]
-        entry_data["album_id"] = album_id
+async def _resolve_album_id(env, album_name):
+    if not album_name:
+        return None
+    await env.cms.prepare(CREATE_ALBUM).bind(album_name).run()
+    row = _to_dict(await env.cms.prepare(GET_ALBUM_ID).bind(album_name).first())
+    return row["id"]
 
-        #Insert en entry
-        cursor = conn.execute(create, entry_data)
-        entry_id = cursor.lastrowid
 
-        #Conectar entry con tag
-        for tag_id in tags_ids:
-            conn.execute(create_et,(tag_id,entry_id))
+async def create_entry(env, entry_data):
+    db = env.cms
 
-        conn.commit()
-        return entry_id
-    except Exception as e:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    # Insert en tags y obtener tag ids
+    tags_ids = []
+    for tag_name in entry_data.get("tags", []):
+        await db.prepare(CREATE_TAG).bind(tag_name).run()
+        row = _to_dict(await db.prepare(GET_TAG_ID).bind(tag_name).first())
+        tags_ids.append(row["id"])
 
-def update_entry(entry_data): #ATENTO AL DESARROLLAR EL FORM, YA QUE NECESITA TODAS LAS COLUMNAS
-    with open('sql/update_entry.sql', 'r') as file:
-            updt = file.read()
+    # Insert en album y obtener album id
+    album_id = await _resolve_album_id(env, entry_data.get("album"))
 
-    conn = get_conn()
-    try:
-        conn.execute(updt,entry_data)
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-    
-def delete_entry(entry_id):
-    with open('sql/delete_entry.sql', 'r') as file:
-        delete = file.read()
+    # Insert en entry
+    res = await db.prepare(CREATE_ENTRY).bind(
+        entry_data["type"],
+        entry_data["title"],
+        entry_data["description"],
+        entry_data["body"],
+        entry_data["slug"],
+        entry_data["file_path"],
+        entry_data["file_size"],
+        entry_data["width"],
+        entry_data["height"],
+        entry_data["taken_at"],
+        entry_data["is_analog"],
+        entry_data["camera_model"],
+        entry_data["film_stock"],
+        entry_data["duration"],
+        album_id,
+    ).run()
+    entry_id = res.meta.last_row_id
 
-    conn = get_conn()
-    try:
-        conn.execute(delete,(entry_id,))
-        conn.commit()
-    finally:
-        conn.close()
+    # Conectar entry con tag
+    for tag_id in tags_ids:
+        await db.prepare(CREATE_ENTRY_TAG).bind(tag_id, entry_id).run()
 
-def publish_entry(entry_id):
-    with open('sql/publish_entry.sql', 'r') as file:
-            publish = file.read()
+    return entry_id
 
-    conn = get_conn()
-    try:
-        conn.execute(publish,(entry_id,))
-        conn.commit()
-    finally:
-        conn.close()
 
-def draft_entry(entry_id):
-    with open('sql/draft_entry.sql', 'r') as file:
-            draft = file.read()
+async def update_entry(env, entry_id, entry_data):
+    db = env.cms
 
-    conn = get_conn()
-    try:
-        conn.execute(draft,(entry_id,))
-        conn.commit()
-    finally:
-        conn.close()
+    album_id = await _resolve_album_id(env, entry_data.get("album"))
 
+    # Preservar estado y fecha de publicacion existentes (el form no los envia).
+    current = _to_dict(await db.prepare(GET_DETAIL).bind(entry_id).first())
+
+    await db.prepare(UPDATE_ENTRY).bind(
+        entry_data["type"],
+        entry_data["title"],
+        entry_data["description"],
+        entry_data["body"],
+        entry_data["slug"],
+        entry_data["file_path"],
+        entry_data["file_size"],
+        entry_data["width"],
+        entry_data["height"],
+        entry_data["taken_at"],
+        entry_data["is_analog"],
+        entry_data["camera_model"],
+        entry_data["film_stock"],
+        entry_data["duration"],
+        album_id,
+        current["status"],
+        current["published_at"],
+        entry_id,
+    ).run()
+
+
+async def delete_entry(env, entry_id):
+    await env.cms.prepare(DELETE_ENTRY).bind(entry_id).run()
+
+
+async def publish_entry(env, entry_id):
+    await env.cms.prepare(PUBLISH_ENTRY).bind(entry_id).run()
+
+
+async def draft_entry(env, entry_id):
+    await env.cms.prepare(DRAFT_ENTRY).bind(entry_id).run()
