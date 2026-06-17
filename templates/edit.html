@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Form</title>
+</head>
+<body>
+    <h1>FORMULARIO</h1>
+    <a href="/panel">VOLVER</a>
+
+    <form action="/form" method="post" enctype="multipart/form-data">
+        <div>
+        <h2>Selecciona tipo de entry</h2>
+        <label>
+            <input type="radio" name="type" id="foto" value="photo" {% if entry['type'] == 'photo' %}checked{% endif %}> Foto
+        </label>
+        <label>
+            <input type="radio" name="type" id="post" value="post" {% if entry['type'] == 'post'  %}checked{% endif %}> Post
+        </label>
+        <label>
+            <input type="radio" name="type" id="video" value="video" {% if entry['type'] == 'video' %}checked{% endif %}> Video
+        </label>
+        </div>
+        <br>
+        <label for="title">Titulo</label>
+        <input type="text" name="title" id="title" value="{{ entry['title'] or '' }}">
+        <br> <br>
+        <label for="slug">Slug(url)</label>
+        <input type="text" name="slug" id="slug" value="{{ entry['slug']  or '' }}">
+        <br> <br>
+        <label for="description">Descripcion</label>
+        <input type="text" name="description" id="description" value="{{ entry['description'] or '' }}">
+        <br> <br>
+        <label for="body">Cuerpo</label>
+        <br>
+        <textarea name="body" id="body" rows="10" cols="50">{{ entry['body'] or '' }}</textarea>
+        <br> <br>
+        <label for="taken_at">Fecha</label>
+        <input type="date" name="taken_at" id="taken_at" value="{{ entry['taken_at'] or '' }}">
+        <label for="album">Album</label>
+        <input type="text" name="album" id="album" value="{{ entry['album_name'] or '' }}">
+        <br> <br>
+        <label for="is_analog">Analoga</label>
+        <input type="checkbox" name="is_analog" id="is_analog" {% if entry['is_analog'] %}checked{% endif %}>
+        <label for="camera_model">Camara</label>
+        <input type="text" name="camera_model" id="camera_model" value="{{ entry['camera_model'] or '' }}">
+        <label for="film_stock">Pelicula</label>
+        <input type="text" name="film_stock" id="film_stock" value="{{ entry['film_stock']   or '' }}">
+        <br> <br>
+        <label for="tags">Etiquetas</label>
+        <input type="text" name="tags" id="tags" value="{{ tags }}">
+        <br><br>
+        <button type="submit">SUBIR</button>
+    </form>
+
+</body>
+</html>

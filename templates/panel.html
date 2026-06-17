@@ -1,13 +1,40 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CMS</title>
+    <style>
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .card {
+            border: 1px solid #ccc;
+            padding: 1rem;
+            overflow: hidden;
+            word-break: break-word;
+        }
+
+        .card p {
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+    </style>
 </head>
+
 <body>
     <h1>PANEL CMS PAGINA WEB</h1>
-    
+
+    {% if request.query_params.get('msg') %}
+    <p>{{ request.query_params.get('msg') }}</p>
+    {% endif %}
+
     <a href="/form">CREAR POST</a>
 
     <br>
@@ -15,6 +42,32 @@
     <h2>POSTS</h2>
 
 
+    <div class="grid">
+        {% for entry in entries %}
+        <div class="card">
+            <p>Tipo:{{ entry['type'] }} — Estado:{{ entry['status'] }}</p>
+            <h3>Titulo:{{ entry['title'] }}</h3>
+            <p>Descripcion:{{ entry['description'] }}</p>
+            {% if entry['album_name'] %}
+            <p>{{ entry['album_name'] }}</p>
+            {% endif %}
+            <a href="/editar/{{ entry['id'] }}">Editar</a>
+            <form action="/publish/{{ entry['id'] }}" method="post">
+                <br>
+                <button type="submit">Publicar</button>
+            </form>
+            <form action="/draft/{{ entry['id'] }}" method="post">
+                <br>
+                <button type="submit">Draftear</button>
+            </form>
+            <form action="/delete/{{ entry['id'] }}" method="post">
+                <br>
+                <button type="submit">Eliminar</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
 
 </body>
+
 </html>
