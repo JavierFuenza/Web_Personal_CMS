@@ -228,8 +228,6 @@ __marimo__/
 
 *.sql
 
-wrangler.toml
-
 # Cloudflare Workers / pywrangler
 # deps vendorizadas, regenerables (pywrangler dev/deploy)
 python_modules/

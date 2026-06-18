@@ -1,0 +1,22 @@
+name = "web-personal-cms"
+main = "src/main.py"
+compatibility_date = "2026-06-17"
+compatibility_flags = ["python_workers"]
+
+# D1: el binding "DB" debe coincidir con env.DB en el codigo.
+# Rellena database_id tras: npx wrangler d1 create cms
+[[d1_databases]]
+binding = "cms"
+database_name = "cms"
+database_id = "9e99eed6-cb12-4ab3-a558-d2d14a25379f"
+
+# R2: binding "BUCKET" para los archivos subidos.
+# Setup: npx wrangler r2 bucket create cms-media
+[[r2_buckets]]
+bucket_name = "cms-media"
+binding = "cms_media"
+
+# Estaticos servidos por Workers Assets (no por FastAPI). public/static/form.js
+# queda accesible en /static/form.js. Las rutas sin asset caen al Worker.
+[assets]
+directory = "public"
