@@ -204,6 +204,13 @@ async def draft(request: Request, entry_id: int):
 @app.post("/delete/{entry_id}")
 async def delete(request: Request, entry_id: int):
     env = request.scope["env"]
+    # Borrar primero el archivo en R2 (si lo hay) para no dejar huerfanos.
+    entry, _ = await db.get_detail(env, entry_id)
+    if entry and entry.get("file_path"):
+        try:
+            await uploads.delete_file(env, entry["file_path"])
+        except Exception:
+            pass  # no bloquear el borrado de la entry si R2 falla
     await db.delete_entry(env, entry_id)
     return RedirectResponse(url="/panel", status_code=303)
 

@@ -131,6 +131,16 @@ DELETE_ENTRY = "DELETE FROM entry WHERE id = ?"
 PUBLISH_ENTRY = 'UPDATE entry SET status = "published" WHERE id = ?'
 DRAFT_ENTRY = 'UPDATE entry SET status = "draft" WHERE id = ?'
 
+# Elimina albums sin ninguna entry asociada (huerfanos tras borrar/editar).
+DELETE_ORPHAN_ALBUMS = (
+    "DELETE FROM album WHERE id NOT IN "
+    "(SELECT album_id FROM entry WHERE album_id IS NOT NULL)"
+)
+
+# Elimina tags que ya no estan asociadas a ninguna entry (entry_tag se vacia
+# por ON DELETE CASCADE al borrar la entry, dejando la tag huerfana).
+DELETE_ORPHAN_TAGS = "DELETE FROM tag WHERE id NOT IN (SELECT tag_id FROM entry_tag)"
+
 
 # --- Helpers de conversion de resultados ------------------------------------
 # D1 devuelve objetos JS (JsProxy en Pyodide). Los convertimos a dict/list de
@@ -283,10 +293,14 @@ async def update_entry(env, entry_id, entry_data):
         current["published_at"],
         entry_id,
     ).run()
+    await db.prepare(DELETE_ORPHAN_ALBUMS).run()
+    await db.prepare(DELETE_ORPHAN_TAGS).run()
 
 
 async def delete_entry(env, entry_id):
     await env.cms.prepare(DELETE_ENTRY).bind(entry_id).run()
+    await env.cms.prepare(DELETE_ORPHAN_ALBUMS).run()
+    await env.cms.prepare(DELETE_ORPHAN_TAGS).run()
 
 
 async def publish_entry(env, entry_id):
