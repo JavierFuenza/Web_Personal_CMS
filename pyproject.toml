@@ -8,7 +8,6 @@ dependencies = [
     "fastapi",
     "jinja2",
     "python-multipart",
-    "pillow",
 ]
 
 [dependency-groups]
