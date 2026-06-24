@@ -90,7 +90,9 @@ FORM = """<!DOCTYPE html>
     <h1>FORMULARIO</h1>
     <a href="/panel">VOLVER</a>
 
-    <form action="/form" method="post" enctype="multipart/form-data">
+    <!-- Sin enctype multipart: form.js sube los archivos directo a R2 y este
+         POST lleva solo texto (incluida la metadata de los archivos subidos). -->
+    <form action="/form" method="post">
         <div>
         <h2>Selecciona tipo de entry</h2>
         <label>
@@ -119,7 +121,9 @@ FORM = """<!DOCTYPE html>
         <br> <br>
         <label for="file">Fotos o Videos</label>
         <br>
-        <input type="file" name="file" id="file" multiple>
+        <!-- Sin name: el archivo lo maneja form.js (subida directa a R2), no se
+             envia como parte del POST. -->
+        <input type="file" id="file" multiple>
         <br> <br>
         <label for="taken_at">Fecha</label>
         <input type="date" name="taken_at" id="taken_at">

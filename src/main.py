@@ -5,7 +5,7 @@ import re
 import db
 import views
 import uploads
-from fastapi import FastAPI, Form, File, Request, UploadFile
+from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, DictLoader, select_autoescape
 
@@ -45,6 +45,25 @@ async def panel(request: Request):
 async def form_get(request: Request):
     return render("form.html", request=request)
 
+
+@app.post("/upload-url")
+async def upload_url(request: Request):
+    """Firma una URL de subida directa a R2 para el archivo que indica el cliente.
+
+    El browser hace el PUT a esa URL; los bytes no pasan por el Worker.
+    """
+    env = request.scope["env"]
+    data = await request.json()
+    key = uploads.make_key(data.get("filename") or "archivo")
+    url = uploads.presign_put(
+        env.R2_ACCOUNT_ID,
+        env.R2_ACCESS_KEY_ID,
+        env.R2_SECRET_ACCESS_KEY,
+        env.R2_BUCKET,
+        key,
+    )
+    return {"key": key, "url": url}
+
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
@@ -83,19 +102,22 @@ def _merge_tags(*lists):
     return out
 
 
-async def _save_with_file(env, base, upload):
-    """Sube un archivo a R2 y crea la entry. Compensa (borra de R2) si falla D1."""
-    content = await upload.read()
-    key = uploads.make_key(upload.filename)
-    width = height = None
-    if base["type"] == "photo":
-        width, height = uploads.image_dimensions(content)
+def _int_or_none(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
-    await uploads.store_file(env, key, content, getattr(upload, "content_type", None))
+
+async def _save_entry_with_meta(env, base, key, size, width, height):
+    """Crea la entry para un archivo YA subido a R2 (el browser hizo el PUT).
+
+    Compensa borrando el objeto de R2 si falla la insercion en D1.
+    """
     entry_data = {
         **base,
         "file_path": key,
-        "file_size": len(content),
+        "file_size": size,
         "width":     width,
         "height":    height,
         "duration":  None,
@@ -121,7 +143,13 @@ async def form_post(
     film_stock:   str = Form(default=None),
     album:        str = Form(default=None),
     tags:         str = Form(default=None),
-    file:         list[UploadFile] = File(default=[]),
+    # Metadata de archivos YA subidos a R2 por el browser (arrays paralelos).
+    # El Worker no recibe bytes: solo la KEY de R2, nombre, tamano y dimensiones.
+    file_keys:    list[str] = Form(default=[]),
+    file_names:   list[str] = Form(default=[]),
+    file_sizes:   list[str] = Form(default=[]),
+    widths:       list[str] = Form(default=[]),
+    heights:      list[str] = Form(default=[]),
     titles:       list[str] = Form(default=[]),
     descriptions: list[str] = Form(default=[]),
     photo_tags:   list[str] = Form(default=[]),
@@ -140,11 +168,16 @@ async def form_post(
         "album":        album,
     }
 
-    # Archivos reales (FastAPI puede mandar un UploadFile vacio si no se eligio).
-    files = [f for f in file if f and getattr(f, "filename", "")]
+    def _meta(i):
+        """(name, size, width, height) del archivo i de los arrays paralelos."""
+        name = file_names[i] if i < len(file_names) else ""
+        size = _int_or_none(file_sizes[i]) if i < len(file_sizes) else None
+        w = _int_or_none(widths[i]) if i < len(widths) else None
+        h = _int_or_none(heights[i]) if i < len(heights) else None
+        return name, size, w, h
 
     try:
-        if not files or type == "post":
+        if not file_keys or type == "post":
             # Sin archivo (incluye posts): el slug lo pone el usuario (o NULL).
             await db.create_entry(env, {
                 **shared,
@@ -158,32 +191,33 @@ async def form_post(
                 "height":      None,
                 "duration":    None,
             })
-        elif len(files) == 1:
+        elif len(file_keys) == 1:
             # Single: respeta el slug del form; si esta vacio, autogenera unico.
-            up = files[0]
+            name, size, w, h = _meta(0)
             slug_val = (slug.strip() if slug and slug.strip()
-                        else await _unique_slug(env, _slug_base(title, up.filename)))
-            await _save_with_file(env, {
+                        else await _unique_slug(env, _slug_base(title, name)))
+            await _save_entry_with_meta(env, {
                 **shared,
                 "title":       title,
                 "description": description,
                 "slug":        slug_val,
                 "tags":        shared_tags,
-            }, up)
+            }, file_keys[0], size, w, h)
         else:
             # Batch: slug autogenerado y unico por archivo (editable luego).
-            for i, upload in enumerate(files):
+            for i, key in enumerate(file_keys):
+                name, size, w, h = _meta(i)
                 own_title = titles[i] if i < len(titles) else None
                 own_desc = descriptions[i] if i < len(descriptions) else None
                 own_tags = _split_tags(photo_tags[i]) if i < len(photo_tags) else []
-                slug_val = await _unique_slug(env, _slug_base(own_title, upload.filename))
-                await _save_with_file(env, {
+                slug_val = await _unique_slug(env, _slug_base(own_title, name))
+                await _save_entry_with_meta(env, {
                     **shared,
                     "title":       own_title,
                     "description": own_desc,
                     "slug":        slug_val,
                     "tags":        _merge_tags(shared_tags, own_tags),
-                }, upload)
+                }, key, size, w, h)
 
         return RedirectResponse(url="/panel?msg=Entrada_creada_correctamente", status_code=303)
     except Exception:

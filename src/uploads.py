@@ -1,12 +1,19 @@
 """Helpers de almacenamiento de archivos en R2.
 
-Suben los bytes de cada archivo a un bucket R2 (binding `env.cms_media`) y extraen
-width/height leyendo el header de la imagen (sin Pillow, para no inflar el bundle
-del Worker por encima del limite de tamano). El `file_path` que se guarda en la
-entry es la KEY de R2, no la URL publica.
+El alta de archivos NO sube los bytes a traves del Worker: el browser hace `PUT`
+directo al endpoint S3 de R2 usando una URL firmada (SigV4) que genera `presign_put`.
+Asi los bytes nunca pasan por el Worker Python (Pyodide buffearia todo el body en
+memoria y rompe con archivos grandes). El Worker solo firma la URL y guarda metadata.
+
+`delete_file` sigue usando el binding R2 (`env.cms_media`) para borrar objetos.
+El `file_path` que se guarda en la entry es la KEY de R2, no la URL publica.
 """
 
+import hashlib
+import hmac
 import re
+from datetime import datetime, timezone
+from urllib.parse import quote
 from uuid import uuid4
 
 try:
@@ -121,3 +128,70 @@ async def store_file(env, key, content, content_type=None):
 
 async def delete_file(env, key):
     await env.cms_media.delete(key)
+
+
+# --- Presigned PUT (AWS SigV4, S3 API de R2) --------------------------------
+# Firma una URL para que el browser suba el archivo directo a R2 sin pasar por
+# el Worker. Solo stdlib (hashlib/hmac), disponible en Pyodide.
+
+def _hmac(key, msg):
+    return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+
+
+def _signing_key(secret, datestamp, region, service):
+    k = _hmac(("AWS4" + secret).encode("utf-8"), datestamp)
+    k = _hmac(k, region)
+    k = _hmac(k, service)
+    k = _hmac(k, "aws4_request")
+    return k
+
+
+def presign_put(account_id, access_key, secret_key, bucket, key,
+                expires=600, region="auto"):
+    """URL firmada (SigV4) para un PUT directo a R2 via su endpoint S3.
+
+    El browser sube los bytes a esta URL; el Worker queda fuera del data path.
+    Se firma solo el header `host` y se usa UNSIGNED-PAYLOAD, para que el PUT
+    del browser no necesite cabeceras extra que rompan la firma.
+    """
+    service = "s3"
+    host = f"{account_id}.r2.cloudflarestorage.com"
+    now = datetime.now(timezone.utc)
+    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+    datestamp = now.strftime("%Y%m%d")
+
+    # La key ya viene saneada (A-Za-z0-9._-), pero codificamos por seguridad.
+    canonical_uri = "/" + quote(f"{bucket}/{key}", safe="/~")
+
+    credential_scope = f"{datestamp}/{region}/{service}/aws4_request"
+    query = {
+        "X-Amz-Algorithm":     "AWS4-HMAC-SHA256",
+        "X-Amz-Credential":    f"{access_key}/{credential_scope}",
+        "X-Amz-Date":          amz_date,
+        "X-Amz-Expires":       str(expires),
+        "X-Amz-SignedHeaders": "host",
+    }
+    canonical_querystring = "&".join(
+        f"{quote(k, safe='-_.~')}={quote(v, safe='-_.~')}"
+        for k, v in sorted(query.items())
+    )
+    canonical_request = "\n".join([
+        "PUT",
+        canonical_uri,
+        canonical_querystring,
+        f"host:{host}\n",
+        "host",
+        "UNSIGNED-PAYLOAD",
+    ])
+    string_to_sign = "\n".join([
+        "AWS4-HMAC-SHA256",
+        amz_date,
+        credential_scope,
+        hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
+    ])
+    signing_key = _signing_key(secret_key, datestamp, region, service)
+    signature = hmac.new(
+        signing_key, string_to_sign.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return (f"https://{host}{canonical_uri}?{canonical_querystring}"
+            f"&X-Amz-Signature={signature}")

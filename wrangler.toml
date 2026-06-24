@@ -20,3 +20,21 @@ binding = "cms_media"
 # queda accesible en /static/form.js. Las rutas sin asset caen al Worker.
 [assets]
 directory = "public"
+
+# Subida directa a R2 (presigned PUT). El Worker firma una URL S3 y el browser
+# hace el PUT directo, sin que los bytes pasen por el Worker.
+#   R2_ACCOUNT_ID: account id de Cloudflare (parte del endpoint S3 de R2).
+#   R2_BUCKET:     nombre del bucket (igual que bucket_name del binding).
+# Las credenciales S3 van como SECRETS (no aqui):
+#   npx wrangler secret put R2_ACCESS_KEY_ID
+#   npx wrangler secret put R2_SECRET_ACCESS_KEY
+# (Crear el token R2 "S3 API" con permiso de escritura sobre cms-media.)
+#
+# CORS del bucket (permitir el PUT del browser desde el origen del CMS):
+#   npx wrangler r2 bucket cors put cms-media --rules '[{
+#     "allowed": {"origins": ["https://<host-del-cms>"],
+#                 "methods": ["PUT"], "headers": ["content-type"]},
+#     "maxAgeSeconds": 3600}]'
+[vars]
+R2_ACCOUNT_ID = "f4d45bb160f96ca211298a8658c8cf08"
+R2_BUCKET = "cms-media"
