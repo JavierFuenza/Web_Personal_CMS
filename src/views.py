@@ -26,11 +26,63 @@ PANEL = """<!DOCTYPE html>
             word-break: break-word;
         }
 
+        .card.selected {
+            border-color: #333;
+            background: #f3f3f3;
+        }
+
         .card p {
             display: -webkit-box;
             -webkit-line-clamp: 3;
             -webkit-box-orient: vertical;
             overflow: hidden;
+        }
+
+        /* Barra de acciones masivas: fija abajo para alcance con el pulgar en movil. */
+        #bulk-bar {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: none;
+            gap: .5rem;
+            align-items: center;
+            flex-wrap: wrap;
+            padding: .75rem 1rem;
+            background: #fff;
+            border-top: 1px solid #ccc;
+        }
+
+        #bulk-bar.visible { display: flex; }
+        #bulk-bar button { padding: .5rem .9rem; }
+        #bulk-count { margin-right: auto; }
+
+        /* Modal de confirmacion de borrado. */
+        #modal-overlay {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, .5);
+            padding: 1rem;
+        }
+
+        #modal-overlay.visible { display: flex; }
+
+        #modal {
+            background: #fff;
+            border: 1px solid #333;
+            padding: 1.5rem;
+            max-width: 360px;
+            width: 100%;
+        }
+
+        #modal .actions {
+            display: flex;
+            gap: .5rem;
+            justify-content: flex-end;
+            margin-top: 1rem;
         }
     </style>
 </head>
@@ -44,37 +96,52 @@ PANEL = """<!DOCTYPE html>
 
     <a href="/form">CREAR POST</a>
 
-    <br>
+    <br><br>
+
+    <label><input type="checkbox" id="select-all"> Seleccionar todo</label>
 
     <h2>POSTS</h2>
 
-
     <div class="grid">
         {% for entry in entries %}
-        <div class="card">
-            <p>Tipo:{{ entry['type'] }} — Estado:{{ entry['status'] }}</p>
+        <div class="card" data-card="{{ entry['id'] }}">
+            <label>
+                <input type="checkbox" class="select-entry" data-id="{{ entry['id'] }}">
+                Seleccionar
+            </label>
+            <p>Tipo:{{ entry['type'] }} — Estado:<span data-status="{{ entry['id'] }}">{{ entry['status'] }}</span></p>
             <h3>Titulo:{{ entry['title'] }}</h3>
             <p>Descripcion:{{ entry['description'] }}</p>
             {% if entry['album_name'] %}
             <p>{{ entry['album_name'] }}</p>
             {% endif %}
             <a href="/editar/{{ entry['id'] }}">Editar</a>
-            <form action="/publish/{{ entry['id'] }}" method="post">
-                <br>
-                <button type="submit">Publicar</button>
-            </form>
-            <form action="/draft/{{ entry['id'] }}" method="post">
-                <br>
-                <button type="submit">Draftear</button>
-            </form>
-            <form action="/delete/{{ entry['id'] }}" method="post">
-                <br>
-                <button type="submit">Eliminar</button>
-            </form>
+            <br><br>
+            <button type="button" data-action="publish" data-id="{{ entry['id'] }}">Publicar</button>
+            <button type="button" data-action="draft" data-id="{{ entry['id'] }}">Draftear</button>
+            <button type="button" data-action="delete" data-id="{{ entry['id'] }}">Eliminar</button>
         </div>
         {% endfor %}
     </div>
 
+    <div id="bulk-bar">
+        <span id="bulk-count">0 seleccionadas</span>
+        <button type="button" data-bulk="publish">Publicar</button>
+        <button type="button" data-bulk="draft">Draftear</button>
+        <button type="button" data-bulk="delete">Eliminar</button>
+    </div>
+
+    <div id="modal-overlay">
+        <div id="modal">
+            <p id="modal-text">¿Eliminar?</p>
+            <div class="actions">
+                <button type="button" id="modal-cancel">Cancelar</button>
+                <button type="button" id="modal-confirm">Eliminar</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/panel.js"></script>
 </body>
 
 </html>"""

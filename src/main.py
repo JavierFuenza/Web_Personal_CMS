@@ -6,7 +6,7 @@ import db
 import views
 import uploads
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from jinja2 import Environment, DictLoader, select_autoescape
 
 app = FastAPI()
@@ -223,30 +223,34 @@ async def form_post(
     except Exception:
         return RedirectResponse(url="/panel?msg=Error", status_code=303)
 
-@app.post("/publish/{entry_id}")
-async def publish(request: Request, entry_id: int):
+@app.post("/entries/bulk")
+async def entries_bulk(request: Request):
     env = request.scope["env"]
-    await db.publish_entry(env, entry_id)
-    return RedirectResponse(url="/panel", status_code=303)
+    try:
+        data = await request.json()
+        action = data.get("action")
+        ids = [int(i) for i in (data.get("ids") or [])]
+    except Exception:
+        return JSONResponse({"ok": False}, status_code=400)
+    if action not in ("publish", "draft", "delete") or not ids:
+        return JSONResponse({"ok": False}, status_code=400)
 
-@app.post("/draft/{entry_id}")
-async def draft(request: Request, entry_id: int):
-    env = request.scope["env"]
-    await db.draft_entry(env, entry_id)
-    return RedirectResponse(url="/panel", status_code=303)
+    if action == "publish":
+        count = await db.publish_bulk(env, ids)
+    elif action == "draft":
+        count = await db.draft_bulk(env, ids)
+    else:
+        # Borrar primero el objeto R2 (si lo hay) para no dejar huerfanos.
+        for entry_id in ids:
+            entry, _ = await db.get_detail(env, entry_id)
+            if entry and entry.get("file_path"):
+                try:
+                    await uploads.delete_file(env, entry["file_path"])
+                except Exception:
+                    pass  # no bloquear el borrado si R2 falla
+        count = await db.delete_bulk(env, ids)
 
-@app.post("/delete/{entry_id}")
-async def delete(request: Request, entry_id: int):
-    env = request.scope["env"]
-    # Borrar primero el archivo en R2 (si lo hay) para no dejar huerfanos.
-    entry, _ = await db.get_detail(env, entry_id)
-    if entry and entry.get("file_path"):
-        try:
-            await uploads.delete_file(env, entry["file_path"])
-        except Exception:
-            pass  # no bloquear el borrado de la entry si R2 falla
-    await db.delete_entry(env, entry_id)
-    return RedirectResponse(url="/panel", status_code=303)
+    return JSONResponse({"ok": True, "count": count})
 
 @app.get("/editar/{entry_id}", response_class=HTMLResponse)
 async def edit_get(request: Request, entry_id: int):

@@ -128,7 +128,11 @@ WHERE id = ?
 """
 
 DELETE_ENTRY = "DELETE FROM entry WHERE id = ?"
-PUBLISH_ENTRY = 'UPDATE entry SET status = "published" WHERE id = ?'
+PUBLISH_ENTRY = (
+    "UPDATE entry SET status = 'published', "
+    "published_at = COALESCE(published_at, strftime('%Y-%m-%dT%H:%M:%S', 'now')) "
+    "WHERE id = ?"
+)
 DRAFT_ENTRY = 'UPDATE entry SET status = "draft" WHERE id = ?'
 
 # Elimina albums sin ninguna entry asociada (huerfanos tras borrar/editar).
@@ -297,15 +301,21 @@ async def update_entry(env, entry_id, entry_data):
     await db.prepare(DELETE_ORPHAN_TAGS).run()
 
 
-async def delete_entry(env, entry_id):
-    await env.cms.prepare(DELETE_ENTRY).bind(entry_id).run()
+async def publish_bulk(env, ids):
+    for entry_id in ids:
+        await env.cms.prepare(PUBLISH_ENTRY).bind(entry_id).run()
+    return len(ids)
+
+
+async def draft_bulk(env, ids):
+    for entry_id in ids:
+        await env.cms.prepare(DRAFT_ENTRY).bind(entry_id).run()
+    return len(ids)
+
+
+async def delete_bulk(env, ids):
+    for entry_id in ids:
+        await env.cms.prepare(DELETE_ENTRY).bind(entry_id).run()
     await env.cms.prepare(DELETE_ORPHAN_ALBUMS).run()
     await env.cms.prepare(DELETE_ORPHAN_TAGS).run()
-
-
-async def publish_entry(env, entry_id):
-    await env.cms.prepare(PUBLISH_ENTRY).bind(entry_id).run()
-
-
-async def draft_entry(env, entry_id):
-    await env.cms.prepare(DRAFT_ENTRY).bind(entry_id).run()
+    return len(ids)
