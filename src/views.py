@@ -152,6 +152,8 @@ FORM = """<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Form</title>
+    <link rel="stylesheet" href="/static/font-awesome.min.css">
+    <link rel="stylesheet" href="/static/easymde.min.css">
 </head>
 <body>
     <h1>FORMULARIO</h1>
@@ -215,6 +217,8 @@ FORM = """<!DOCTYPE html>
         <button type="submit">SUBIR</button>
     </form>
     <script src="/static/form.js"></script>
+    <script src="/static/easymde.min.js"></script>
+    <script src="/static/cms-editor.js"></script>
 </body>
 </html>"""
 
@@ -224,6 +228,8 @@ EDIT = """<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Form</title>
+    <link rel="stylesheet" href="/static/font-awesome.min.css">
+    <link rel="stylesheet" href="/static/easymde.min.css">
 </head>
 <body>
     <h1>FORMULARIO</h1>
@@ -274,6 +280,8 @@ EDIT = """<!DOCTYPE html>
         <button type="submit">SUBIR</button>
     </form>
 
+    <script src="/static/easymde.min.js"></script>
+    <script src="/static/cms-editor.js"></script>
 </body>
 </html>"""
 
