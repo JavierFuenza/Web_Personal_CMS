@@ -54,6 +54,7 @@ GET_ALL = """
 SELECT e.id, e.title, e.description, e.type, e.status, e.published_at, e.file_path, a.name AS album_name
 FROM entry e
 LEFT JOIN album a ON e.album_id = a.id
+ORDER BY e.id DESC
 """
 
 GET_DETAIL = """
