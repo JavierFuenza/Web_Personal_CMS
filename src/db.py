@@ -297,15 +297,21 @@ async def update_entry(env, entry_id, entry_data):
     await db.prepare(DELETE_ORPHAN_TAGS).run()
 
 
-async def delete_entry(env, entry_id):
-    await env.cms.prepare(DELETE_ENTRY).bind(entry_id).run()
+async def publish_bulk(env, ids):
+    for entry_id in ids:
+        await env.cms.prepare(PUBLISH_ENTRY).bind(entry_id).run()
+    return len(ids)
+
+
+async def draft_bulk(env, ids):
+    for entry_id in ids:
+        await env.cms.prepare(DRAFT_ENTRY).bind(entry_id).run()
+    return len(ids)
+
+
+async def delete_bulk(env, ids):
+    for entry_id in ids:
+        await env.cms.prepare(DELETE_ENTRY).bind(entry_id).run()
     await env.cms.prepare(DELETE_ORPHAN_ALBUMS).run()
     await env.cms.prepare(DELETE_ORPHAN_TAGS).run()
-
-
-async def publish_entry(env, entry_id):
-    await env.cms.prepare(PUBLISH_ENTRY).bind(entry_id).run()
-
-
-async def draft_entry(env, entry_id):
-    await env.cms.prepare(DRAFT_ENTRY).bind(entry_id).run()
+    return len(ids)
