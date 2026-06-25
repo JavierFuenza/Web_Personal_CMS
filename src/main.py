@@ -226,10 +226,12 @@ async def form_post(
 @app.post("/entries/bulk")
 async def entries_bulk(request: Request):
     env = request.scope["env"]
-    data = await request.json()
-    action = data.get("action")
-    ids = data.get("ids") or []
-    ids = [int(i) for i in ids]
+    try:
+        data = await request.json()
+        action = data.get("action")
+        ids = [int(i) for i in (data.get("ids") or [])]
+    except Exception:
+        return JSONResponse({"ok": False}, status_code=400)
     if action not in ("publish", "draft", "delete") or not ids:
         return JSONResponse({"ok": False}, status_code=400)
 
