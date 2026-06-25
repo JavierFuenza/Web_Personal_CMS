@@ -128,7 +128,11 @@ WHERE id = ?
 """
 
 DELETE_ENTRY = "DELETE FROM entry WHERE id = ?"
-PUBLISH_ENTRY = 'UPDATE entry SET status = "published" WHERE id = ?'
+PUBLISH_ENTRY = (
+    "UPDATE entry SET status = 'published', "
+    "published_at = COALESCE(published_at, strftime('%Y-%m-%dT%H:%M:%S', 'now')) "
+    "WHERE id = ?"
+)
 DRAFT_ENTRY = 'UPDATE entry SET status = "draft" WHERE id = ?'
 
 # Elimina albums sin ninguna entry asociada (huerfanos tras borrar/editar).
